@@ -222,7 +222,7 @@ function ProductCard({ p, h, onWish, onCart }: {
     <TouchableOpacity
       activeOpacity={0.9}
       style={styles.card}
-      onPress={() => router.push({ pathname: "/product/[id]", params: { id: p.id } })}
+      onPress={() => router.push(`/product/${p.id}` as any)}
       testID={`product-card-${p.id}`}
     >
       <View style={{ position: "relative" }}>

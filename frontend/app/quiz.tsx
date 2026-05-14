@@ -98,7 +98,7 @@ export default function Quiz() {
           <TouchableOpacity
             testID="quiz-done-button"
             style={styles.cta}
-            onPress={() => router.replace("/(tabs)/discover")}
+            onPress={() => router.replace("/discover")}
           >
             <Text style={styles.ctaText}>Start exploring</Text>
           </TouchableOpacity>

@@ -14,6 +14,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="quiz" options={{ presentation: "modal" }} />
           <Stack.Screen name="facescan" options={{ presentation: "modal" }} />
+          <Stack.Screen name="stores" options={{ presentation: "modal" }} />
+          <Stack.Screen name="retailer" />
           <Stack.Screen name="product/[id]" />
         </Stack>
       </AuthProvider>

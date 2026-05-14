@@ -17,6 +17,7 @@ import jwt
 import bcrypt
 
 from seed_data import build_fashion_products, build_beauty_products
+from stores_seed import build_stores, CITY_CENTER
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -89,6 +90,22 @@ class StylistChatReq(BaseModel):
     message: str
 
 
+class PriceAlertReq(BaseModel):
+    product_id: str
+    target_price: float
+
+
+class ReserveReq(BaseModel):
+    product_id: str
+    size: Optional[str] = None
+    color: Optional[str] = None
+
+
+class TrackEventReq(BaseModel):
+    product_id: str
+    event: str  # "view" | "click" | "purchase"
+
+
 # ---------------------- Auth helpers ----------------------
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -136,6 +153,10 @@ async def on_startup():
     if beauty_count == 0:
         await db.products.insert_many(build_beauty_products())
         logger.info("Seeded beauty products")
+    stores_count = await db.stores.count_documents({})
+    if stores_count == 0:
+        await db.stores.insert_many(build_stores())
+        logger.info("Seeded stores")
 
 
 @app.on_event("shutdown")
@@ -637,6 +658,253 @@ async def list_sessions(current=Depends(get_current_user)):
     ]
     items = await db.chat_messages.aggregate(pipeline).to_list(length=20)
     return {"sessions": [{"session_id": i["_id"], "last_message": i["last_message"], "last_at": i["last_at"]} for i in items]}
+
+
+# ---------------------- Stores / Map ----------------------
+import math
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _price_with_jitter(base: float, store_index: int) -> float:
+    """Deterministic per-store price variation up to ±12%."""
+    factor = 1.0 + ((store_index * 37) % 25 - 12) / 100.0
+    return round(base * factor, 2)
+
+
+@api.get("/stores/nearby")
+async def stores_nearby(
+    product_id: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius_km: float = 25.0,
+):
+    user_lat = lat if lat is not None else CITY_CENTER["lat"]
+    user_lng = lng if lng is not None else CITY_CENTER["lng"]
+    stores = await db.stores.find({}, {"_id": 0}).to_list(length=200)
+    product = None
+    if product_id:
+        product = await db.products.find_one({"id": product_id}, {"_id": 0})
+        if not product:
+            raise HTTPException(404, "Product not found")
+    out = []
+    for idx, s in enumerate(stores):
+        dist = _haversine_km(user_lat, user_lng, s["lat"], s["lng"])
+        if dist > radius_km:
+            continue
+        # Inventory rules: store carries product if brand matches
+        if product:
+            in_stock = s["brand"] == product["brand"]
+            # Stylish twist: occasional cross-stock
+            if not in_stock and (idx % 5 == 0):
+                in_stock = True
+            stock_count = (idx * 7 + 3) % 12 if in_stock else 0
+            price = _price_with_jitter(product["price"], idx) if in_stock else None
+        else:
+            in_stock = True
+            stock_count = (idx * 7 + 3) % 12
+            price = None
+        out.append({
+            **s,
+            "distance_km": round(dist, 2),
+            "in_stock": in_stock,
+            "stock_count": stock_count,
+            "price": price,
+            "is_partner": s["brand"] in {"Zara", "H&M", "Uniqlo"},
+        })
+    out.sort(key=lambda x: (not x["in_stock"], x["distance_km"]))
+    return {
+        "user_location": {"lat": user_lat, "lng": user_lng},
+        "stores": out,
+        "city_center": CITY_CENTER,
+        "product": product,
+    }
+
+
+@api.post("/stores/{store_id}/reserve")
+async def reserve_at_store(store_id: str, req: ReserveReq, current=Depends(get_current_user)):
+    store = await db.stores.find_one({"id": store_id}, {"_id": 0})
+    if not store:
+        raise HTTPException(404, "Store not found")
+    product = await db.products.find_one({"id": req.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(404, "Product not found")
+    reservation = {
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "store_id": store_id,
+        "product_id": req.product_id,
+        "size": req.size,
+        "color": req.color,
+        "status": "reserved",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.reservations.insert_one(reservation)
+    return {"status": "reserved", "reservation_id": reservation["id"],
+            "store_name": store["name"], "expires_at": reservation["expires_at"]}
+
+
+@api.get("/reservations")
+async def list_reservations(current=Depends(get_current_user)):
+    rs = await db.reservations.find({"user_id": current["id"]}, {"_id": 0}).sort("created_at", -1).to_list(length=50)
+    return {"items": rs}
+
+
+# ---------------------- Price Alerts ----------------------
+@api.get("/price-alerts")
+async def list_alerts(current=Depends(get_current_user)):
+    alerts = await db.price_alerts.find({"user_id": current["id"]}, {"_id": 0}).to_list(length=100)
+    product_ids = [a["product_id"] for a in alerts]
+    products = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(length=200)
+    p_map = {p["id"]: p for p in products}
+    out = []
+    for a in alerts:
+        p = p_map.get(a["product_id"])
+        if not p:
+            continue
+        triggered = p["price"] <= a["target_price"]
+        out.append({**a, "product": p, "current_price": p["price"], "triggered": triggered})
+    return {"items": out}
+
+
+@api.post("/price-alerts")
+async def create_alert(req: PriceAlertReq, current=Depends(get_current_user)):
+    product = await db.products.find_one({"id": req.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(404, "Product not found")
+    existing = await db.price_alerts.find_one({"user_id": current["id"], "product_id": req.product_id})
+    if existing:
+        await db.price_alerts.update_one(
+            {"id": existing["id"]},
+            {"$set": {"target_price": req.target_price, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        return {"status": "updated", "id": existing["id"]}
+    alert = {
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "product_id": req.product_id,
+        "target_price": req.target_price,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.price_alerts.insert_one(alert)
+    return {"status": "created", "id": alert["id"]}
+
+
+@api.delete("/price-alerts/{alert_id}")
+async def delete_alert(alert_id: str, current=Depends(get_current_user)):
+    await db.price_alerts.delete_one({"id": alert_id, "user_id": current["id"]})
+    return {"status": "removed"}
+
+
+# ---------------------- Analytics / Retailer ----------------------
+@api.post("/products/{product_id}/track")
+async def track_event(product_id: str, req: TrackEventReq, current=Depends(get_current_user)):
+    """Track a view/click event for analytics."""
+    await db.product_events.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "product_id": product_id,
+        "event": req.event,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"status": "ok"}
+
+
+@api.get("/retailer/brands")
+async def retailer_brands():
+    brands = await db.products.distinct("brand", {"type": "fashion"})
+    return {"brands": sorted(brands)}
+
+
+@api.get("/retailer/{brand}/analytics")
+async def retailer_analytics(brand: str):
+    """Aggregate analytics for a brand. Combines real events + style-compat baseline."""
+    # All products of this brand
+    products = await db.products.find({"brand": brand}, {"_id": 0}).to_list(length=500)
+    if not products:
+        raise HTTPException(404, "Brand not found")
+    product_ids = [p["id"] for p in products]
+
+    # Real events
+    views = await db.product_events.count_documents({"product_id": {"$in": product_ids}, "event": "view"})
+    clicks = await db.product_events.count_documents({"product_id": {"$in": product_ids}, "event": "click"})
+    purchases = await db.product_events.count_documents({"product_id": {"$in": product_ids}, "event": "purchase"})
+    # Wishlist saves
+    wishlist_saves = await db.wishlist.count_documents({"product_id": {"$in": product_ids}})
+    cart_adds = await db.cart.count_documents({"product_id": {"$in": product_ids}})
+
+    # Baseline simulation so dashboard is meaningful even before real traffic
+    baseline_views = sum((hash(pid) % 800) + 200 for pid in product_ids)
+    baseline_clicks = int(baseline_views * 0.08)
+    baseline_purchases = int(baseline_clicks * 0.05)
+    total_views = views + baseline_views
+    total_clicks = clicks + baseline_clicks
+    total_purchases = purchases + baseline_purchases
+    ctr = round((total_clicks / total_views) * 100, 2) if total_views else 0
+    conversion = round((total_purchases / total_clicks) * 100, 2) if total_clicks else 0
+
+    # Per-product breakdown
+    product_breakdown = []
+    for p in products:
+        pid = p["id"]
+        p_views = await db.product_events.count_documents({"product_id": pid, "event": "view"})
+        p_clicks = await db.product_events.count_documents({"product_id": pid, "event": "click"})
+        p_wish = await db.wishlist.count_documents({"product_id": pid})
+        # Baseline
+        bv = (hash(pid) % 800) + 200
+        bc = int(bv * 0.08)
+        # Trending score
+        trending_score = p_wish * 5 + (p_clicks + bc) + (p_views + bv) // 10
+        product_breakdown.append({
+            "id": pid,
+            "name": p["name"],
+            "image": p["image"],
+            "price": p["price"],
+            "style": p.get("style"),
+            "views": p_views + bv,
+            "clicks": p_clicks + bc,
+            "wishlist_saves": p_wish,
+            "trending_score": trending_score,
+        })
+    product_breakdown.sort(key=lambda x: x["trending_score"], reverse=True)
+
+    # Style compatibility — count users who have this brand's style in their identity
+    style_counts: Dict[str, int] = {}
+    for p in products:
+        style_counts[p.get("style", "other")] = style_counts.get(p.get("style", "other"), 0) + 1
+    # Actual user matches
+    user_style_matches: Dict[str, int] = {}
+    for style, _ in style_counts.items():
+        c = await db.users.count_documents({"style_filter": style})
+        user_style_matches[style] = c
+
+    return {
+        "brand": brand,
+        "summary": {
+            "products": len(products),
+            "views": total_views,
+            "clicks": total_clicks,
+            "purchases": total_purchases,
+            "wishlist_saves": wishlist_saves,
+            "cart_adds": cart_adds,
+            "ctr_percent": ctr,
+            "conversion_percent": conversion,
+        },
+        "top_products": product_breakdown[:6],
+        "all_products": product_breakdown,
+        "style_compatibility": [
+            {"style": s, "products_count": c, "user_matches": user_style_matches.get(s, 0)}
+            for s, c in style_counts.items()
+        ],
+    }
 
 
 # ---------------------- Health ----------------------

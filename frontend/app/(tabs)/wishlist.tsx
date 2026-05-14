@@ -83,7 +83,7 @@ export default function WishlistTab() {
               <TouchableOpacity
                 key={p.id}
                 style={styles.gcard}
-                onPress={() => router.push({ pathname: "/product/[id]", params: { id: p.id } })}
+                onPress={() => router.push(`/product/${p.id}` as any)}
                 activeOpacity={0.9}
                 testID={`wishlist-item-${p.id}`}
               >
@@ -176,7 +176,7 @@ function EmptyState({ icon, title, subtitle }: any) {
       <Text style={[typography.body, { textAlign: "center", marginTop: 6 }]}>{subtitle}</Text>
       <TouchableOpacity
         style={styles.exploreBtn}
-        onPress={() => router.push("/(tabs)/discover")}
+        onPress={() => router.push("/discover")}
         testID="empty-explore"
       >
         <Text style={styles.exploreText}>Explore feed</Text>

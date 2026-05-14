@@ -120,7 +120,7 @@ function BeautyCard({ p }: { p: Beauty }) {
     <TouchableOpacity
       style={styles.bcard}
       activeOpacity={0.9}
-      onPress={() => router.push({ pathname: "/product/[id]", params: { id: p.id } })}
+      onPress={() => router.push(`/product/${p.id}` as any)}
       testID={`beauty-card-${p.id}`}
     >
       <View style={styles.bImageWrap}>

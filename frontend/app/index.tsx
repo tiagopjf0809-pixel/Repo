@@ -17,8 +17,8 @@ export default function Index() {
     );
   }
 
-  if (user) return <Redirect href="/(tabs)/discover" />;
-  return <Redirect href="/(auth)/login" />;
+  if (user) return <Redirect href="/discover" />;
+  return <Redirect href="/login" />;
 }
 
 const styles = StyleSheet.create({

@@ -20,7 +20,7 @@ export default function Profile() {
 
   const handleLogout = async () => {
     await logout();
-    router.replace("/(auth)/login");
+    router.replace("/login");
   };
 
   return (
@@ -107,6 +107,21 @@ export default function Profile() {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity
+          testID="open-retailer-dashboard"
+          style={styles.linkRow}
+          onPress={() => router.push("/retailer")}
+        >
+          <View style={styles.linkIconBox}>
+            <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.linkTitle}>Retailer Dashboard</Text>
+            <Text style={styles.linkSub}>Brand analytics · CTR · conversion</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+
         <TouchableOpacity testID="logout-button" style={styles.logoutBtn} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={16} color={colors.textMain} />
           <Text style={styles.logoutText}>Sign out</Text>
@@ -159,6 +174,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14, borderRadius: radii.pill, backgroundColor: colors.surface,
     borderWidth: 1, borderColor: colors.border, marginTop: spacing.md,
   },
+  linkRow: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: colors.surface, padding: 14, borderRadius: radii.lg,
+    borderWidth: 1, borderColor: colors.borderSoft, marginBottom: spacing.sm,
+  },
+  linkIconBox: {
+    width: 40, height: 40, borderRadius: 999, backgroundColor: colors.surfaceSecondary,
+    alignItems: "center", justifyContent: "center",
+  },
+  linkTitle: { fontSize: 14, fontWeight: "600", color: colors.textMain },
+  linkSub: { fontSize: 11.5, color: colors.textMuted, marginTop: 2 },
   logoutText: { color: colors.textMain, fontWeight: "600", fontSize: 14 },
   footer: { textAlign: "center", marginTop: 24, fontSize: 11, color: colors.textMuted, letterSpacing: 1 },
 });

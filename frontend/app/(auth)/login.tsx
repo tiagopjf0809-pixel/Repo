@@ -24,7 +24,7 @@ export default function Login() {
     setLoading(true);
     try {
       await login(email.trim().toLowerCase(), password);
-      router.replace("/(tabs)/discover");
+      router.replace("/discover");
     } catch (e: any) {
       setError(e?.response?.data?.detail || "Login failed");
     } finally {

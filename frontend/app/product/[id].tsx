@@ -1,12 +1,29 @@
 import { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator,
+  Linking, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../src/api";
 import { colors, radii, spacing, typography, shadows } from "../../src/theme";
+
+const BRAND_SITES: Record<string, string> = {
+  "Zara": "https://www.zara.com",
+  "H&M": "https://www2.hm.com",
+  "Uniqlo": "https://www.uniqlo.com",
+  "COS": "https://www.cos.com",
+  "Aritzia": "https://www.aritzia.com",
+  "Reformation": "https://www.thereformation.com",
+  "Everlane": "https://www.everlane.com",
+  "Ganni": "https://www.ganni.com",
+  "Levi's": "https://www.levi.com",
+  "Acne Studios": "https://www.acnestudios.com",
+  "Fenty Beauty": "https://fentybeauty.com",
+  "Rare Beauty": "https://www.rarebeauty.com",
+  "Charlotte Tilbury": "https://www.charlottetilbury.com",
+};
 
 export default function ProductDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -15,21 +32,59 @@ export default function ProductDetail() {
   const [size, setSize] = useState<string | null>(null);
   const [color, setColor] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [alertTarget, setAlertTarget] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id) return;
-    api.get(`/products/${id}`).then((r) => {
-      setP(r.data);
-      setSize(r.data.sizes?.[0] || null);
-      setColor(r.data.colors?.[0] || r.data.shades?.[0] || null);
-    });
+    if (!id) {
+      setError("No product specified");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    api.get(`/products/${id}`)
+      .then((r) => {
+        setP(r.data);
+        setSize(r.data.sizes?.[0] || null);
+        setColor(r.data.colors?.[0] || r.data.shades?.[0] || null);
+        // Track view for retailer analytics (fire-and-forget)
+        api.post(`/products/${id}/track`, { product_id: id, event: "view" }).catch(() => {});
+      })
+      .catch((e) => {
+        setError(e?.response?.status === 404 ? "Product not found" : "Failed to load product");
+      })
+      .finally(() => setLoading(false));
     api.get(`/products/${id}/similar`).then((r) => setSimilar(r.data.items)).catch(() => {});
   }, [id]);
 
-  if (!p) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
-        <ActivityIndicator color={colors.primary} style={{ flex: 1 }} />
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !p) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.center}>
+          <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
+          <Text style={[typography.h3, { marginTop: 12, textAlign: "center" }]}>
+            {error || "Product unavailable"}
+          </Text>
+          <TouchableOpacity
+            testID="error-back-button"
+            style={styles.errorBtn}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.errorBtnText}>Go back</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
@@ -37,14 +92,48 @@ export default function ProductDetail() {
   const isBeauty = p.type === "beauty";
 
   const addCart = async () => {
-    await api.post("/cart", { product_id: p.id, size, color, quantity: 1 });
-    setFeedback("Added to cart");
-    setTimeout(() => setFeedback(null), 1800);
+    try {
+      await api.post("/cart", { product_id: p.id, size, color, quantity: 1 });
+      api.post(`/products/${p.id}/track`, { product_id: p.id, event: "click" }).catch(() => {});
+      setFeedback("Added to cart");
+      setTimeout(() => setFeedback(null), 1800);
+    } catch {
+      setFeedback("Failed to add — try again");
+      setTimeout(() => setFeedback(null), 1800);
+    }
   };
   const wish = async () => {
-    await api.post("/wishlist", { product_id: p.id });
-    setFeedback("Saved to wishlist");
-    setTimeout(() => setFeedback(null), 1800);
+    try {
+      await api.post("/wishlist", { product_id: p.id });
+      setFeedback("Saved to wishlist");
+      setTimeout(() => setFeedback(null), 1800);
+    } catch {
+      setFeedback("Failed to save");
+      setTimeout(() => setFeedback(null), 1800);
+    }
+  };
+  const createAlert = async () => {
+    try {
+      const target = Math.round(p.price * 0.9 * 100) / 100;
+      await api.post("/price-alerts", { product_id: p.id, target_price: target });
+      setAlertTarget(target);
+      setFeedback(`Price alert set: $${target}`);
+      setTimeout(() => setFeedback(null), 1800);
+    } catch {
+      setFeedback("Failed to set alert");
+      setTimeout(() => setFeedback(null), 1800);
+    }
+  };
+  const openRetailer = async () => {
+    const url = BRAND_SITES[p.brand];
+    if (!url) {
+      Alert.alert("Retailer site unavailable", `${p.brand} doesn't have a linked site yet.`);
+      return;
+    }
+    api.post(`/products/${p.id}/track`, { product_id: p.id, event: "click" }).catch(() => {});
+    const ok = await Linking.canOpenURL(url);
+    if (ok) Linking.openURL(url);
+    else Alert.alert("Cannot open link", url);
   };
 
   return (
@@ -140,6 +229,54 @@ export default function ProductDetail() {
             </View>
           )}
 
+          {/* Universal CTA: Shop at retailer */}
+          <TouchableOpacity
+            testID="shop-at-retailer"
+            style={styles.retailerCta}
+            onPress={openRetailer}
+            activeOpacity={0.85}
+          >
+            <View style={styles.retailerIcon}>
+              <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.retailerTitle}>
+                {isBeauty ? "Buy Now" : "View in Store"}
+              </Text>
+              <Text style={styles.retailerSub}>Shop on {p.brand}'s official site</Text>
+            </View>
+            <Ionicons name="open-outline" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          {!isBeauty && (
+            <View style={styles.actionTwoCol}>
+              <TouchableOpacity
+                testID="find-in-store"
+                style={styles.actionCol}
+                onPress={() => router.push(`/stores?product_id=${p.id}` as any)}
+              >
+                <Ionicons name="location-outline" size={16} color={colors.textMain} />
+                <View>
+                  <Text style={styles.actionTitle}>Find in store</Text>
+                  <Text style={styles.actionSub}>Reserve · compare prices</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: "auto" }} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="price-alert"
+                style={styles.actionCol}
+                onPress={createAlert}
+              >
+                <Ionicons name="notifications-outline" size={16} color={colors.textMain} />
+                <View>
+                  <Text style={styles.actionTitle}>{alertTarget ? `Alert at $${alertTarget}` : "Price alert"}</Text>
+                  <Text style={styles.actionSub}>Notify on sale (-10%)</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: "auto" }} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {similar.length > 0 && (
             <Section title="You might also like">
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -147,7 +284,7 @@ export default function ProductDetail() {
                   <TouchableOpacity
                     key={s.id}
                     style={styles.simCard}
-                    onPress={() => router.push({ pathname: "/product/[id]", params: { id: s.id } })}
+                    onPress={() => router.push(`/product/${s.id}` as any)}
                     testID={`similar-${s.id}`}
                   >
                     <Image source={{ uri: s.image }} style={styles.simImg} />
@@ -246,6 +383,29 @@ const styles = StyleSheet.create({
     backgroundColor: colors.sustainBg, padding: 12, borderRadius: radii.md, marginTop: spacing.lg,
   },
   sustainText: { color: colors.sustainText, fontSize: 13, fontWeight: "600" },
+  actionTwoCol: { gap: 8, marginTop: spacing.lg },
+  actionCol: {
+    flexDirection: "row", alignItems: "center", gap: 12, padding: 14,
+    backgroundColor: colors.surface, borderRadius: radii.lg,
+    borderWidth: 1, borderColor: colors.borderSoft,
+  },
+  actionTitle: { fontSize: 13.5, fontWeight: "600", color: colors.textMain },
+  actionSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  retailerCta: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: colors.surface, padding: 14, borderRadius: radii.lg,
+    borderWidth: 1, borderColor: colors.primary,
+    marginTop: spacing.lg,
+  },
+  retailerIcon: {
+    width: 36, height: 36, borderRadius: 999,
+    backgroundColor: colors.budgetBg, alignItems: "center", justifyContent: "center",
+  },
+  retailerTitle: { fontSize: 14, fontWeight: "700", color: colors.textMain },
+  retailerSub: { fontSize: 11.5, color: colors.textMuted, marginTop: 2 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  errorBtn: { marginTop: 18, paddingVertical: 12, paddingHorizontal: 28, borderRadius: radii.pill, backgroundColor: colors.ctaBg },
+  errorBtnText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   simCard: { width: 130, marginRight: 10 },
   simImg: { width: "100%", height: 150, borderRadius: radii.md, backgroundColor: colors.surfaceSecondary },
   simBrand: { ...typography.brand, marginTop: 8 },

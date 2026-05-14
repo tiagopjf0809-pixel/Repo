@@ -149,7 +149,7 @@ export default function FaceScan() {
                     <TouchableOpacity
                       key={p.id}
                       style={styles.recCard}
-                      onPress={() => router.push({ pathname: "/product/[id]", params: { id: p.id } })}
+                      onPress={() => router.push(`/product/${p.id}` as any)}
                       testID={`rec-${p.id}`}
                     >
                       <Image source={{ uri: p.image }} style={styles.recImg} />
@@ -171,7 +171,7 @@ export default function FaceScan() {
             <TouchableOpacity
               testID="facescan-done"
               style={[styles.cta, { marginTop: 28 }]}
-              onPress={() => router.replace("/(tabs)/beauty")}
+              onPress={() => router.replace("/beauty")}
             >
               <Text style={styles.ctaText}>View all beauty</Text>
             </TouchableOpacity>
