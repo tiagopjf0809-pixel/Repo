@@ -1,22 +1,27 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Lumi",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan your face for personalized makeup recommendations",
+        "NSPhotoLibraryUsageDescription": "Upload a selfie for beauty analysis"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000"
+        "backgroundColor": "#FAFAF8"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE"]
     },
     "web": {
       "bundler": "metro",
@@ -31,7 +36,14 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000"
+          "backgroundColor": "#FAFAF8"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Lumi needs photo access to upload a selfie for beauty analysis.",
+          "cameraPermission": "Lumi needs camera access to scan your face for personalized recommendations."
         }
       ]
     ],

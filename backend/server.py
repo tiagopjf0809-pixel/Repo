@@ -1,59 +1,651 @@
-from fastapi import FastAPI, APIRouter
+"""Lumi backend — fashion & beauty discovery platform."""
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List
 import uuid
-from datetime import datetime
+import json
+import re
+from pathlib import Path
+from pydantic import BaseModel, EmailStr, Field
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
+import jwt
+import bcrypt
 
+from seed_data import build_fashion_products, build_beauty_products
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+MONGO_URL = os.environ['MONGO_URL']
+DB_NAME = os.environ['DB_NAME']
+JWT_SECRET = os.environ['JWT_SECRET']
+JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 43200))
+EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
 
-# Create the main app without a prefix
-app = FastAPI()
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("lumi")
+
+app = FastAPI(title="Lumi API")
+api = APIRouter(prefix="/api")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+# ---------------------- Models ----------------------
+class SignupReq(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+class LoginReq(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenResp(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]
+
+
+class StyleQuizReq(BaseModel):
+    colors: List[str]
+    fit: str
+    inspiration: List[str]
+    budget: str
+    lifestyle: str
+
+
+class CartItemReq(BaseModel):
+    product_id: str
+    size: Optional[str] = None
+    color: Optional[str] = None
+    quantity: int = 1
+
+
+class CartUpdateReq(BaseModel):
+    quantity: int
+
+
+class WishlistReq(BaseModel):
+    product_id: str
+
+
+class FaceScanReq(BaseModel):
+    image_base64: str
+
+
+class StylistChatReq(BaseModel):
+    session_id: Optional[str] = None
+    message: str
+
+
+# ---------------------- Auth helpers ----------------------
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def create_access_token(subject: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": subject, "exp": expire, "iat": datetime.now(timezone.utc)}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)) -> Dict[str, Any]:
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+# ---------------------- Startup: seed ----------------------
+@app.on_event("startup")
+async def on_startup():
+    fashion_count = await db.products.count_documents({"type": "fashion"})
+    if fashion_count == 0:
+        await db.products.insert_many(build_fashion_products())
+        logger.info("Seeded fashion products")
+    beauty_count = await db.products.count_documents({"type": "beauty"})
+    if beauty_count == 0:
+        await db.products.insert_many(build_beauty_products())
+        logger.info("Seeded beauty products")
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
+
+
+# ---------------------- Auth routes ----------------------
+@api.post("/auth/signup", response_model=TokenResp)
+async def signup(req: SignupReq):
+    email = req.email.lower()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id,
+        "email": email,
+        "password": hash_password(req.password),
+        "full_name": req.full_name or email.split("@")[0],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "style_identity": None,
+    }
+    await db.users.insert_one(user_doc)
+    token = create_access_token(user_id)
+    safe_user = {k: v for k, v in user_doc.items() if k not in ("password", "_id")}
+    return TokenResp(access_token=token, user=safe_user)
+
+
+@api.post("/auth/login", response_model=TokenResp)
+async def login(req: LoginReq):
+    email = req.email.lower()
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(req.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token(user["id"])
+    safe_user = {k: v for k, v in user.items() if k not in ("password", "_id")}
+    return TokenResp(access_token=token, user=safe_user)
+
+
+@api.get("/auth/me")
+async def me(current=Depends(get_current_user)):
+    return current
+
+
+# ---------------------- Products (Fashion) ----------------------
+@api.get("/products")
+async def list_products(
+    style: Optional[str] = None,
+    brand: Optional[str] = None,
+    color: Optional[str] = None,
+    size: Optional[str] = None,
+    sustainable: Optional[bool] = None,
+    budget: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    skip: int = 0,
+    limit: int = 24,
+):
+    q: Dict[str, Any] = {"type": "fashion"}
+    if style:
+        q["style"] = style
+    if brand:
+        q["brand"] = brand
+    if color:
+        q["colors"] = color
+    if size:
+        q["sizes"] = size
+    if sustainable is not None:
+        q["sustainable"] = sustainable
+    if budget:
+        q["budget_category"] = budget
+    price_q: Dict[str, Any] = {}
+    if min_price is not None:
+        price_q["$gte"] = min_price
+    if max_price is not None:
+        price_q["$lte"] = max_price
+    if price_q:
+        q["price"] = price_q
+    cursor = db.products.find(q, {"_id": 0}).skip(skip).limit(limit)
+    items = await cursor.to_list(length=limit)
+    total = await db.products.count_documents(q)
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
+
+
+@api.get("/products/filters")
+async def get_filters():
+    brands = await db.products.distinct("brand", {"type": "fashion"})
+    styles = await db.products.distinct("style", {"type": "fashion"})
+    colors = await db.products.distinct("colors", {"type": "fashion"})
+    sizes = await db.products.distinct("sizes", {"type": "fashion"})
+    return {
+        "brands": sorted(brands),
+        "styles": sorted(styles),
+        "colors": sorted(colors),
+        "sizes": sizes,
+        "budgets": ["Under $50", "$50–$100", "$100+"],
+    }
+
+
+@api.get("/products/{product_id}")
+async def get_product(product_id: str):
+    p = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Product not found")
+    return p
+
+
+@api.get("/products/{product_id}/similar")
+async def similar_products(product_id: str):
+    p = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Product not found")
+    if p.get("type") == "fashion":
+        q = {"type": "fashion", "style": p["style"], "id": {"$ne": product_id}}
+    else:
+        q = {"type": "beauty", "category": p.get("category"), "id": {"$ne": product_id}}
+    items = await db.products.find(q, {"_id": 0}).limit(8).to_list(length=8)
+    return {"items": items}
+
+
+# ---------------------- Beauty Products ----------------------
+@api.get("/beauty/products")
+async def list_beauty(category: Optional[str] = None, brand: Optional[str] = None):
+    q: Dict[str, Any] = {"type": "beauty"}
+    if category:
+        q["category"] = category
+    if brand:
+        q["brand"] = brand
+    items = await db.products.find(q, {"_id": 0}).to_list(length=200)
+    return {"items": items}
+
+
+# ---------------------- Wishlist ----------------------
+@api.get("/wishlist")
+async def get_wishlist(current=Depends(get_current_user)):
+    entries = await db.wishlist.find({"user_id": current["id"]}, {"_id": 0}).to_list(length=500)
+    product_ids = [e["product_id"] for e in entries]
+    products = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(length=500)
+    return {"items": products}
+
+
+@api.post("/wishlist")
+async def add_wishlist(req: WishlistReq, current=Depends(get_current_user)):
+    existing = await db.wishlist.find_one({"user_id": current["id"], "product_id": req.product_id})
+    if existing:
+        return {"status": "already_added"}
+    await db.wishlist.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "product_id": req.product_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"status": "added"}
+
+
+@api.delete("/wishlist/{product_id}")
+async def remove_wishlist(product_id: str, current=Depends(get_current_user)):
+    await db.wishlist.delete_one({"user_id": current["id"], "product_id": product_id})
+    return {"status": "removed"}
+
+
+# ---------------------- Cart ----------------------
+@api.get("/cart")
+async def get_cart(current=Depends(get_current_user)):
+    items = await db.cart.find({"user_id": current["id"]}, {"_id": 0}).to_list(length=200)
+    # enrich with product info
+    product_ids = [i["product_id"] for i in items]
+    products = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(length=200)
+    product_map = {p["id"]: p for p in products}
+    enriched = []
+    subtotal = 0.0
+    for it in items:
+        p = product_map.get(it["product_id"])
+        if not p:
+            continue
+        line_total = p["price"] * it["quantity"]
+        subtotal += line_total
+        enriched.append({**it, "product": p, "line_total": round(line_total, 2)})
+    return {"items": enriched, "subtotal": round(subtotal, 2)}
+
+
+@api.post("/cart")
+async def add_cart(req: CartItemReq, current=Depends(get_current_user)):
+    existing = await db.cart.find_one({
+        "user_id": current["id"],
+        "product_id": req.product_id,
+        "size": req.size,
+        "color": req.color,
+    })
+    if existing:
+        await db.cart.update_one({"id": existing["id"]}, {"$inc": {"quantity": req.quantity}})
+        return {"status": "updated"}
+    await db.cart.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "product_id": req.product_id,
+        "size": req.size,
+        "color": req.color,
+        "quantity": req.quantity,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"status": "added"}
+
+
+@api.patch("/cart/{item_id}")
+async def update_cart(item_id: str, req: CartUpdateReq, current=Depends(get_current_user)):
+    if req.quantity <= 0:
+        await db.cart.delete_one({"id": item_id, "user_id": current["id"]})
+        return {"status": "removed"}
+    await db.cart.update_one({"id": item_id, "user_id": current["id"]}, {"$set": {"quantity": req.quantity}})
+    return {"status": "updated"}
+
+
+@api.delete("/cart/{item_id}")
+async def delete_cart(item_id: str, current=Depends(get_current_user)):
+    await db.cart.delete_one({"id": item_id, "user_id": current["id"]})
+    return {"status": "removed"}
+
+
+# ---------------------- Style Quiz ----------------------
+def derive_style_identity(req: StyleQuizReq) -> Dict[str, Any]:
+    """Simple deterministic mapping from quiz answers to style identity."""
+    inspiration = [s.lower() for s in req.inspiration]
+    score = {
+        "Minimalist": 0,
+        "Quiet Luxury": 0,
+        "Streetwear": 0,
+        "Old Money": 0,
+        "Vintage": 0,
+        "Athleisure": 0,
+    }
+    for tag in inspiration:
+        if "minimal" in tag:
+            score["Minimalist"] += 2
+        if "luxury" in tag or "quiet" in tag:
+            score["Quiet Luxury"] += 2
+        if "street" in tag:
+            score["Streetwear"] += 2
+        if "old money" in tag or "preppy" in tag:
+            score["Old Money"] += 2
+        if "vintage" in tag or "retro" in tag:
+            score["Vintage"] += 2
+        if "athletic" in tag or "sport" in tag:
+            score["Athleisure"] += 2
+    fit = (req.fit or "").lower()
+    if "oversized" in fit:
+        score["Streetwear"] += 1
+    if "tailored" in fit:
+        score["Old Money"] += 1
+        score["Quiet Luxury"] += 1
+    if "fitted" in fit:
+        score["Minimalist"] += 1
+    lifestyle = (req.lifestyle or "").lower()
+    if "corporate" in lifestyle:
+        score["Quiet Luxury"] += 1
+    if "student" in lifestyle:
+        score["Streetwear"] += 1
+    if "nightlife" in lifestyle:
+        score["Old Money"] += 1
+    identity = max(score, key=score.get)
+    style_to_filter = {
+        "Minimalist": "minimal",
+        "Quiet Luxury": "quiet luxury",
+        "Streetwear": "streetwear",
+        "Old Money": "old money",
+        "Vintage": "vintage",
+        "Athleisure": "athletic",
+    }
+    descriptions = {
+        "Minimalist": "Clean lines, neutral palettes, and timeless silhouettes define your style.",
+        "Quiet Luxury": "Understated elegance and elevated essentials in muted, refined tones.",
+        "Streetwear": "Oversized fits, graphic energy, and a confident, urban edge.",
+        "Old Money": "Preppy, classic, and timeless — think trench coats and tailored knits.",
+        "Vintage": "Retro silhouettes, washed denim, and nostalgic textures.",
+        "Athleisure": "Sport-luxe pieces that move with you — performance meets style.",
+    }
+    return {
+        "identity": identity,
+        "description": descriptions[identity],
+        "filter_style": style_to_filter[identity],
+        "score": score,
+    }
+
+
+@api.post("/style/quiz")
+async def submit_quiz(req: StyleQuizReq, current=Depends(get_current_user)):
+    result = derive_style_identity(req)
+    await db.users.update_one(
+        {"id": current["id"]},
+        {"$set": {
+            "style_identity": result["identity"],
+            "style_filter": result["filter_style"],
+            "style_description": result["description"],
+            "quiz_answers": req.dict(),
+            "quiz_completed_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    # Suggest products
+    suggested = await db.products.find(
+        {"type": "fashion", "style": result["filter_style"]}, {"_id": 0}
+    ).limit(8).to_list(length=8)
+    return {**result, "suggested_products": suggested}
+
+
+@api.get("/style/profile")
+async def get_profile(current=Depends(get_current_user)):
+    user = await db.users.find_one({"id": current["id"]}, {"_id": 0, "password": 0})
+    return user
+
+
+# ---------------------- Beauty: Face Scan AI ----------------------
+def _strip_json(text: str) -> Optional[Dict[str, Any]]:
+    """Extract the first JSON object from a model response."""
+    if not text:
+        return None
+    # Remove markdown fences
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```\s*", "", text)
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+FACE_SCAN_PROMPT = """You are a professional beauty analyst. Analyze the selfie and return ONLY a JSON object with these exact keys:
+{
+  "skin_tone": "fair|light|medium|tan|deep",
+  "undertone": "cool|neutral|warm",
+  "skin_type": "dry|oily|combination|normal",
+  "face_shape": "oval|round|square|heart|long|diamond",
+  "under_eye_tone": "neutral|blue|purple|brown",
+  "lip_shape": "full|thin|heart|wide|bow",
+  "eye_shape": "almond|round|hooded|monolid|downturned|upturned",
+  "notes": "one short sentence of professional observation"
+}
+No markdown, no extra text — only the JSON object."""
+
+
+@api.post("/beauty/face-scan")
+async def face_scan(req: FaceScanReq, current=Depends(get_current_user)):
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    except Exception as e:
+        raise HTTPException(500, f"LLM integration unavailable: {e}")
+
+    # Strip any data URL prefix from the base64
+    img_b64 = req.image_base64
+    if img_b64.startswith("data:"):
+        img_b64 = img_b64.split(",", 1)[-1]
+
+    session_id = str(uuid.uuid4())
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=FACE_SCAN_PROMPT,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    msg = UserMessage(
+        text="Analyze this selfie according to the system instructions. Return only the JSON object.",
+        file_contents=[ImageContent(image_base64=img_b64)],
+    )
+
+    try:
+        response = await chat.send_message(msg)
+    except Exception as e:
+        logger.exception("Face scan LLM error")
+        raise HTTPException(502, f"AI analysis failed: {str(e)[:200]}")
+
+    parsed = _strip_json(response) or {}
+    # Defaults if some fields missing
+    analysis = {
+        "skin_tone": parsed.get("skin_tone", "medium"),
+        "undertone": parsed.get("undertone", "neutral"),
+        "skin_type": parsed.get("skin_type", "normal"),
+        "face_shape": parsed.get("face_shape", "oval"),
+        "under_eye_tone": parsed.get("under_eye_tone", "neutral"),
+        "lip_shape": parsed.get("lip_shape", "full"),
+        "eye_shape": parsed.get("eye_shape", "almond"),
+        "notes": parsed.get("notes", "Balanced, healthy complexion."),
+    }
+
+    # Recommendations: pull beauty products matching skin tone/type
+    beauty = await db.products.find({"type": "beauty"}, {"_id": 0}).to_list(length=500)
+    recs: Dict[str, List[Dict[str, Any]]] = {}
+    categories = ["foundation", "concealer", "blush", "contour", "lip", "eye"]
+    for cat in categories:
+        cat_items = [p for p in beauty if p.get("category") == cat]
+        # Score by skin tone/type compatibility
+        scored = []
+        for p in cat_items:
+            score = 0
+            tones = p.get("compatible_skin_tones") or []
+            types = p.get("compatible_skin_types") or []
+            if analysis["skin_tone"] in tones or "all" in tones:
+                score += 2
+            if analysis["skin_type"] in types or "all" in types:
+                score += 1
+            score += min(p.get("derm_rating", 0), 5) * 0.5
+            scored.append((score, p))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        recs[cat] = [p for _, p in scored[:3]]
+
+    # Persist
+    scan_id = str(uuid.uuid4())
+    await db.face_scans.insert_one({
+        "id": scan_id,
+        "user_id": current["id"],
+        "analysis": analysis,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {
+        "id": scan_id,
+        "analysis": analysis,
+        "recommendations": recs,
+    }
+
+
+@api.get("/beauty/face-scan/latest")
+async def latest_scan(current=Depends(get_current_user)):
+    scan = await db.face_scans.find_one(
+        {"user_id": current["id"]},
+        {"_id": 0},
+        sort=[("created_at", -1)]
+    )
+    return scan or {}
+
+
+# ---------------------- AI Stylist Chat ----------------------
+STYLIST_SYSTEM = """You are Lumi, a warm and stylish AI personal shopper. You help users build outfits, suggest looks for specific occasions (weddings, work, dates, nightlife), recommend pieces by style identity, and consider weather and budget. Keep responses concise (3-5 sentences), friendly, and visual — describe textures, silhouettes, colors. Suggest specific item types (e.g., 'an oversized linen blazer in stone'). Never invent brand stock or links. Ask one short follow-up question when helpful."""
+
+
+@api.post("/stylist/chat")
+async def stylist_chat(req: StylistChatReq, current=Depends(get_current_user)):
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception as e:
+        raise HTTPException(500, f"LLM integration unavailable: {e}")
+
+    session_id = req.session_id or str(uuid.uuid4())
+
+    # Build system message with user context
+    user = await db.users.find_one({"id": current["id"]}, {"_id": 0})
+    style_id = user.get("style_identity") if user else None
+    system = STYLIST_SYSTEM
+    if style_id:
+        system += f"\n\nThe user's style identity is: {style_id}."
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    try:
+        response = await chat.send_message(UserMessage(text=req.message))
+    except Exception as e:
+        logger.exception("Stylist chat LLM error")
+        raise HTTPException(502, f"AI stylist failed: {str(e)[:200]}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.chat_messages.insert_many([
+        {"id": str(uuid.uuid4()), "session_id": session_id, "user_id": current["id"],
+         "role": "user", "content": req.message, "created_at": now},
+        {"id": str(uuid.uuid4()), "session_id": session_id, "user_id": current["id"],
+         "role": "assistant", "content": response, "created_at": now},
+    ])
+
+    return {"session_id": session_id, "reply": response}
+
+
+@api.get("/stylist/sessions/{session_id}")
+async def get_session(session_id: str, current=Depends(get_current_user)):
+    msgs = await db.chat_messages.find(
+        {"session_id": session_id, "user_id": current["id"]},
+        {"_id": 0}
+    ).sort("created_at", 1).to_list(length=200)
+    return {"session_id": session_id, "messages": msgs}
+
+
+@api.get("/stylist/sessions")
+async def list_sessions(current=Depends(get_current_user)):
+    pipeline = [
+        {"$match": {"user_id": current["id"]}},
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$session_id",
+            "last_message": {"$first": "$content"},
+            "last_at": {"$first": "$created_at"},
+        }},
+        {"$sort": {"last_at": -1}},
+        {"$limit": 20},
+    ]
+    items = await db.chat_messages.aggregate(pipeline).to_list(length=20)
+    return {"sessions": [{"session_id": i["_id"], "last_message": i["last_message"], "last_at": i["last_at"]} for i in items]}
+
+
+# ---------------------- Health ----------------------
+@api.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"name": "Lumi API", "status": "ok"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.dict()
-    status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
-    return [StatusCheck(**status_check) for status_check in status_checks]
-
-# Include the router in the main app
-app.include_router(api_router)
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,14 +654,3 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
