@@ -1,0 +1,132 @@
+{
+  "project_name": "Lumi",
+  "platform": "Mobile Web App",
+  "theme": "Light",
+  "archetype": "Archetype 1: Organic & Earthy",
+  "mood": "Clean, Minimalist, Tactile, Grounded, Approachable",
+  "design_philosophy": {
+    "core_principles": [
+      "Generous spacing: Use p-4 to p-8 consistently to let content breathe, especially on mobile.",
+      "Tactile surfaces: Avoid flat grays. Use warm, stone-like off-whites and soft shadows.",
+      "High contrast typography: Espresso/charcoal text on warm sand backgrounds.",
+      "Masonry dominance: Pinterest-like feel for the discovery feed using CSS columns.",
+      "Mobile-first navigation: A sticky glassmorphism bottom tab bar."
+    ]
+  },
+  "colors": {
+    "background": "#FAFAF8",
+    "surface": "#FFFFFF",
+    "surface_secondary": "#F3EFEA",
+    "primary": "#C09473",
+    "primary_hover": "#A67B5B",
+    "text_main": "#2A2421",
+    "text_muted": "#756B61",
+    "border": "#E6E2DC",
+    "accent_success": "#5C7053",
+    "accent_warning": "#D4A373",
+    "cta_background": "#2A2421",
+    "cta_text": "#FFFFFF"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Outfit, sans-serif",
+      "weights": ["300", "400", "600"],
+      "classes": "font-sans"
+    },
+    "body": {
+      "family": "Manrope, sans-serif",
+      "weights": ["400", "500"],
+      "classes": "font-sans"
+    },
+    "accent": {
+      "family": "Playfair Display, serif",
+      "weights": ["400", "italic"],
+      "classes": "font-serif italic"
+    }
+  },
+  "typography": {
+    "h1": "text-4xl tracking-tighter font-outfit font-light text-[#2A2421] leading-none",
+    "h2": "text-2xl tracking-tight font-outfit font-medium text-[#2A2421]",
+    "h3": "text-xl tracking-tight font-outfit font-medium text-[#2A2421]",
+    "body": "text-base font-manrope leading-relaxed text-[#756B61]",
+    "small": "text-sm font-manrope text-[#756B61]",
+    "overline": "text-xs tracking-[0.2em] uppercase font-outfit font-semibold text-[#C09473]"
+  },
+  "spacing_and_layout": {
+    "container_padding": "px-4 py-6 md:px-8 md:py-12",
+    "element_gap": "gap-4 md:gap-6",
+    "masonry_feed": "columns-2 gap-4 space-y-4",
+    "border_radius": {
+      "cards": "rounded-2xl",
+      "buttons": "rounded-full",
+      "inputs": "rounded-xl",
+      "images": "rounded-2xl"
+    }
+  },
+  "components": {
+    "navigation_tab_bar": {
+      "type": "fixed_bottom",
+      "classes": "fixed bottom-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/80 border-t border-[#E6E2DC] pb-safe pt-2 px-6 flex justify-between items-center h-20"
+    },
+    "product_card": {
+      "classes": "break-inside-avoid mb-4 overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_rgba(42,36,33,0.04)] border border-[#E6E2DC]/50",
+      "image_wrapper": "relative w-full overflow-hidden bg-[#F3EFEA]",
+      "content": "p-3",
+      "brand_text": "text-xs tracking-[0.1em] uppercase font-semibold text-[#756B61] mb-1",
+      "price_text": "text-sm font-medium text-[#2A2421]"
+    },
+    "buttons": {
+      "primary": "w-full py-4 rounded-full bg-[#2A2421] text-white font-medium text-base hover:bg-[#1F1A18] transition-colors shadow-lg shadow-black/10 active:scale-[0.98]",
+      "secondary": "w-full py-4 rounded-full bg-[#F3EFEA] text-[#2A2421] font-medium text-base hover:bg-[#E6E2DC] transition-colors active:scale-[0.98]",
+      "icon_action": "h-10 w-10 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center text-[#2A2421] shadow-sm"
+    },
+    "tags": {
+      "budget": "px-2.5 py-1 rounded-full bg-[#C09473]/10 text-[#A67B5B] text-xs font-semibold",
+      "sustainability": "px-2.5 py-1 rounded-full bg-[#5C7053]/10 text-[#5C7053] text-xs font-semibold"
+    },
+    "filters_sheet": {
+      "classes": "fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-3xl shadow-[0_-8px_32px_rgba(0,0,0,0.08)] p-6"
+    },
+    "chat_bubble": {
+      "user": "bg-[#F3EFEA] text-[#2A2421] rounded-2xl rounded-tr-sm p-4 max-w-[85%]",
+      "ai": "bg-white border border-[#E6E2DC] text-[#2A2421] rounded-2xl rounded-tl-sm p-4 max-w-[85%] shadow-sm"
+    }
+  },
+  "media": {
+    "images": {
+      "onboarding_background": "https://static.prod-images.emergentagent.com/jobs/104d9d79-a0ea-4886-9e3b-4b055fc95b18/images/f0111192863fcf064202438757e86042a3e5f778b8e48802d5950e87972a6326.png",
+      "fashion_feed": [
+        "https://images.unsplash.com/photo-1629922944655-a4c0ae9e07f1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHw0fHxtaW5pbWFsaXN0JTIwZmFzaGlvbiUyMGNsb3RoaW5nJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzc4NzU4NDEyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1629922947773-ad0eff4ad420?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwZmFzaGlvbiUyMGNsb3RoaW5nJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzc4NzU4NDEyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1629922953055-f3907995e662?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwzfHxtaW5pbWFsaXN0JTIwZmFzaGlvbiUyMGNsb3RoaW5nJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzc4NzU4NDEyfDA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1629922944153-83495b3814ef?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwZmFzaGlvbiUyMGNsb3RoaW5nJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzc4NzU4NDEyfDA&ixlib=rb-4.1.0&q=85"
+      ],
+      "beauty_analysis": [
+        "https://images.unsplash.com/photo-1622399622605-13b4c1c1d86d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHw0fHxiZWF1dHklMjBza2luY2FyZSUyMGZhY2UlMjBzY2FufGVufDB8fHx8MTc3ODc1ODQxMnww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwxfHxiZWF1dHklMjBza2luY2FyZSUyMGZhY2UlMjBzY2FufGVufDB8fHx8MTc3ODc1ODQxMnww&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1605769574581-b2511b6afa08?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2ODh8MHwxfHNlYXJjaHwzfHxiZWF1dHklMjBza2luY2FyZSUyMGZhY2UlMjBzY2FufGVufDB8fHx8MTc3ODc1ODQxMnww&ixlib=rb-4.1.0&q=85"
+      ]
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "stroke_width": 1.5,
+    "size_default": 24
+  },
+  "animation_and_motion": {
+    "page_transition": "framer-motion, initial opacity-0 y-4, animate opacity-100 y-0, duration 0.4s ease-out",
+    "card_hover": "transition-transform duration-300 ease-out hover:-translate-y-1 hover:shadow-lg",
+    "button_tap": "active:scale-95 transition-transform duration-150"
+  },
+  "testing": {
+    "attributes": "MUST include data-testid attribute on all interactive elements (buttons, links, form inputs, tabs, bottom bar actions)."
+  },
+  "instructions_to_main_agent": [
+    "Build this as a mobile-first responsive web app that feels like a native app. Keep max-width constraints on desktop to simulate a mobile frame (e.g. max-w-md mx-auto) or adapt to a split-pane layout.",
+    "Use CSS columns (columns-2 gap-4) for the Pinterest-style masonry grid.",
+    "Implement the bottom navigation bar as a fixed element with glassmorphism to emulate an app feel.",
+    "Ensure all Shadcn components (sheets, dialogs, inputs) are customized to match the Organic & Earthy archetype, avoiding default Vercel-like sharp edges and pure grays.",
+    "Use the provided media images to populate the fashion feed and beauty dashboard placeholders.",
+    "Integrate Lucide React icons with a light stroke-width (1.5) for elegance."
+  ]
+}
