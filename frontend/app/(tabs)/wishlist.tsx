@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator,
+  Linking, Platform, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
@@ -39,6 +40,32 @@ export default function WishlistTab() {
   };
   const removeCart = async (itemId: string) => {
     await api.delete(`/cart/${itemId}`); refresh();
+  };
+
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const checkout = async () => {
+    setCheckoutLoading(true);
+    try {
+      const res = await api.post("/checkout/session", {});
+      const { url, demo_mode } = res.data;
+      if (demo_mode) {
+        // Direct in-app navigation for demo mode
+        const sid = res.data.session_id;
+        router.push(`/cart-success?session_id=${sid}&demo=1`);
+        return;
+      }
+      if (Platform.OS === "web") {
+        (window as any).location.href = url;
+      } else {
+        const can = await Linking.canOpenURL(url);
+        if (can) await Linking.openURL(url);
+        else Alert.alert("Cannot open checkout", url);
+      }
+    } catch (e: any) {
+      Alert.alert("Checkout failed", e?.response?.data?.detail || "Please try again");
+    } finally {
+      setCheckoutLoading(false);
+    }
   };
 
   return (
@@ -155,8 +182,16 @@ export default function WishlistTab() {
                 <Text style={typography.overline}>Subtotal</Text>
                 <Text style={styles.subtotalAmt}>${subtotal.toFixed(2)}</Text>
               </View>
-              <TouchableOpacity testID="checkout-btn" style={styles.checkoutBtn} activeOpacity={0.85}>
-                <Text style={styles.checkoutText}>Checkout · ${subtotal.toFixed(2)}</Text>
+              <TouchableOpacity
+                testID="checkout-btn"
+                style={[styles.checkoutBtn, checkoutLoading && { opacity: 0.6 }]}
+                activeOpacity={0.85}
+                onPress={checkout}
+                disabled={checkoutLoading}
+              >
+                {checkoutLoading ? <ActivityIndicator color="#fff" /> : (
+                  <Text style={styles.checkoutText}>Checkout · ${subtotal.toFixed(2)}</Text>
+                )}
               </TouchableOpacity>
             </>
           )}

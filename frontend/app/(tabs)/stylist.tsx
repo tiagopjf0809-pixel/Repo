@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../../src/api";
 import { colors, radii, spacing, typography, shadows } from "../../src/theme";
@@ -62,7 +63,15 @@ export default function Stylist() {
             <Text style={styles.brand}>Stylist</Text>
             <Text style={styles.sub}>Your AI personal shopper</Text>
           </View>
-          <View style={styles.avatar}><Ionicons name="sparkles" size={20} color={colors.primary} /></View>
+          <TouchableOpacity
+            testID="open-outfit-builder"
+            style={styles.outfitBtn}
+            onPress={() => router.push("/outfit-builder")}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="shirt-outline" size={14} color="#fff" />
+            <Text style={styles.outfitBtnText}>Build outfit</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -146,6 +155,12 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 999, backgroundColor: colors.surfaceSecondary,
     alignItems: "center", justifyContent: "center",
   },
+  outfitBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 14, paddingVertical: 10, borderRadius: radii.pill,
+    backgroundColor: colors.ctaBg, ...shadows.cta,
+  },
+  outfitBtnText: { color: "#fff", fontSize: 12.5, fontWeight: "600" },
   chatContainer: { padding: spacing.lg, paddingBottom: 20 },
   bubble: { maxWidth: "85%", padding: 14, borderRadius: radii.lg, marginBottom: 10 },
   userBubble: { alignSelf: "flex-end", backgroundColor: colors.surfaceSecondary, borderTopRightRadius: 4 },

@@ -15,6 +15,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
+import stripe
 
 from seed_data import build_fashion_products, build_beauty_products
 from stores_seed import build_stores, CITY_CENTER
@@ -28,6 +29,9 @@ JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 43200))
 EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
+stripe.api_key = STRIPE_API_KEY
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://fashion-lens-23.preview.emergentagent.com')
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -104,6 +108,22 @@ class ReserveReq(BaseModel):
 class TrackEventReq(BaseModel):
     product_id: str
     event: str  # "view" | "click" | "purchase"
+
+
+class CheckoutReq(BaseModel):
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+class OutfitCreateReq(BaseModel):
+    name: str
+    product_ids: List[str]
+    occasion: Optional[str] = None
+
+
+class OutfitStyleReq(BaseModel):
+    product_ids: List[str]
+    occasion: Optional[str] = None  # e.g., "first date", "office", "beach wedding"
 
 
 # ---------------------- Auth helpers ----------------------
@@ -905,6 +925,276 @@ async def retailer_analytics(brand: str):
             for s, c in style_counts.items()
         ],
     }
+
+
+# ---------------------- Checkout (Stripe) ----------------------
+@api.post("/checkout/session")
+async def create_checkout_session(req: CheckoutReq, current=Depends(get_current_user)):
+    """Create Stripe Checkout Session from server-side cart."""
+    cart_items = await db.cart.find({"user_id": current["id"]}, {"_id": 0}).to_list(length=200)
+    if not cart_items:
+        raise HTTPException(400, "Cart is empty")
+
+    product_ids = [c["product_id"] for c in cart_items]
+    products = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0}).to_list(length=200)
+    p_map = {p["id"]: p for p in products}
+
+    line_items = []
+    total_cents = 0
+    for it in cart_items:
+        p = p_map.get(it["product_id"])
+        if not p:
+            continue
+        unit_amount = int(round(p["price"] * 100))
+        line_items.append({
+            "price_data": {
+                "currency": "usd",
+                "product_data": {
+                    "name": f"{p['brand']} · {p['name']}"[:120],
+                    "images": [p["image"]] if p.get("image") else [],
+                    "metadata": {"product_id": p["id"]},
+                },
+                "unit_amount": unit_amount,
+            },
+            "quantity": it["quantity"],
+        })
+        total_cents += unit_amount * it["quantity"]
+
+    if not line_items:
+        raise HTTPException(400, "No valid items in cart")
+
+    success_url = (req.success_url or f"{FRONTEND_URL}/cart-success") + "?session_id={CHECKOUT_SESSION_ID}"
+    cancel_url = req.cancel_url or f"{FRONTEND_URL}/wishlist"
+
+    demo_mode = False
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=line_items,
+            mode="payment",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            client_reference_id=current["id"],
+            metadata={"user_id": current["id"]},
+        )
+        session_id = session.id
+        session_url = session.url
+    except stripe.error.AuthenticationError:
+        # No valid Stripe key configured — fall back to DEMO checkout
+        logger.warning("Stripe key invalid — using DEMO checkout fallback")
+        demo_mode = True
+        session_id = f"demo_{uuid.uuid4()}"
+        session_url = f"{FRONTEND_URL}/cart-success?session_id={session_id}&demo=1"
+    except stripe.error.StripeError as e:
+        logger.exception("Stripe error")
+        raise HTTPException(502, f"Stripe error: {str(e)[:200]}")
+
+    order = {
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "session_id": session_id,
+        "status": "pending",
+        "demo_mode": demo_mode,
+        "total_cents": total_cents,
+        "items": [{"product_id": it["product_id"], "quantity": it["quantity"],
+                   "size": it.get("size"), "color": it.get("color")} for it in cart_items],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.orders.insert_one(order)
+    return {"session_id": session_id, "url": session_url, "order_id": order["id"], "demo_mode": demo_mode}
+
+
+@api.get("/checkout/session/{session_id}")
+async def verify_checkout_session(session_id: str, current=Depends(get_current_user)):
+    """Verify session status. Clears cart on success."""
+    # Demo-mode session (no real Stripe key configured)
+    if session_id.startswith("demo_"):
+        order = await db.orders.find_one({"session_id": session_id, "user_id": current["id"]}, {"_id": 0})
+        if not order:
+            raise HTTPException(404, "Order not found")
+        if order.get("status") != "completed":
+            # Mark as paid + clear cart + record purchases
+            cart_items = await db.cart.find({"user_id": current["id"]}, {"_id": 0}).to_list(length=200)
+            for it in cart_items:
+                await db.product_events.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "user_id": current["id"],
+                    "product_id": it["product_id"],
+                    "event": "purchase",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+            await db.cart.delete_many({"user_id": current["id"]})
+            await db.orders.update_one(
+                {"session_id": session_id},
+                {"$set": {"status": "completed", "payment_status": "paid",
+                          "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            order["status"] = "completed"
+        return {
+            "session_id": session_id,
+            "payment_status": "paid",
+            "status": "completed",
+            "paid": True,
+            "amount_total": order.get("total_cents", 0),
+            "order": order,
+            "demo_mode": True,
+        }
+
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except stripe.error.StripeError as e:
+        raise HTTPException(404, f"Session not found: {str(e)[:200]}")
+
+    if session.metadata.get("user_id") != current["id"]:
+        raise HTTPException(403, "Not your session")
+
+    paid = session.payment_status == "paid"
+    new_status = "completed" if paid else session.payment_status
+    await db.orders.update_one(
+        {"session_id": session_id, "user_id": current["id"]},
+        {"$set": {"status": new_status, "payment_status": session.payment_status,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    if paid:
+        # Record purchase events for analytics + clear cart
+        cart_items = await db.cart.find({"user_id": current["id"]}, {"_id": 0}).to_list(length=200)
+        for it in cart_items:
+            await db.product_events.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": current["id"],
+                "product_id": it["product_id"],
+                "event": "purchase",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        await db.cart.delete_many({"user_id": current["id"]})
+
+    order = await db.orders.find_one({"session_id": session_id}, {"_id": 0})
+    return {
+        "session_id": session_id,
+        "payment_status": session.payment_status,
+        "status": new_status,
+        "paid": paid,
+        "amount_total": session.amount_total,
+        "order": order,
+    }
+
+
+@api.get("/orders")
+async def list_orders(current=Depends(get_current_user)):
+    items = await db.orders.find({"user_id": current["id"]}, {"_id": 0}).sort("created_at", -1).to_list(length=50)
+    return {"items": items}
+
+
+# ---------------------- Outfits ----------------------
+OUTFIT_STYLIST_SYSTEM = """You are Lumi's outfit stylist. The user picks several specific items from the catalog. Your job: in 4-6 sentences, describe a complete outfit using THESE exact pieces, calling each by its brand+name, and explain the styling rationale (silhouette, color story, occasion-fit). End with one optional accessory or finishing-touch suggestion. Be specific, warm, and confident — like a personal shopper. No bullet lists, no markdown."""
+
+
+@api.post("/outfits/style")
+async def style_outfit(req: OutfitStyleReq, current=Depends(get_current_user)):
+    """Use Claude to describe an outfit composed of selected products."""
+    if not req.product_ids:
+        raise HTTPException(400, "No products selected")
+    products = await db.products.find({"id": {"$in": req.product_ids}}, {"_id": 0}).to_list(length=20)
+    if not products:
+        raise HTTPException(404, "No products found")
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception as e:
+        raise HTTPException(500, f"LLM unavailable: {e}")
+
+    user = await db.users.find_one({"id": current["id"]}, {"_id": 0})
+    style_id = user.get("style_identity") if user else None
+    sys_msg = OUTFIT_STYLIST_SYSTEM
+    if style_id:
+        sys_msg += f"\n\nThe user's style identity is: {style_id}."
+
+    items_text = "\n".join(
+        f"- {p['brand']} {p['name']} (${p['price']:.0f}, style: {p.get('style', '—')}, colors: {', '.join(p.get('colors', [])[:3]) or '—'})"
+        for p in products
+    )
+    occasion_text = f" The occasion is: {req.occasion}." if req.occasion else ""
+    prompt = f"Style this outfit using these {len(products)} pieces:\n{items_text}\n{occasion_text}"
+
+    session_id = str(uuid.uuid4())
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=sys_msg)\
+        .with_model("anthropic", "claude-sonnet-4-5-20250929")
+    try:
+        response = await chat.send_message(UserMessage(text=prompt))
+    except Exception as e:
+        logger.exception("Outfit styling LLM error")
+        raise HTTPException(502, f"AI styling failed: {str(e)[:200]}")
+
+    return {
+        "styling": response,
+        "products": products,
+        "occasion": req.occasion,
+        "total_price": round(sum(p["price"] for p in products), 2),
+    }
+
+
+@api.post("/outfits")
+async def save_outfit(req: OutfitCreateReq, current=Depends(get_current_user)):
+    if not req.product_ids:
+        raise HTTPException(400, "No products selected")
+    outfit = {
+        "id": str(uuid.uuid4()),
+        "user_id": current["id"],
+        "name": req.name,
+        "occasion": req.occasion,
+        "product_ids": req.product_ids,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.outfits.insert_one(outfit)
+    return {"id": outfit["id"], "status": "saved"}
+
+
+@api.get("/outfits")
+async def list_outfits(current=Depends(get_current_user)):
+    outfits = await db.outfits.find({"user_id": current["id"]}, {"_id": 0}).sort("created_at", -1).to_list(length=50)
+    # enrich with product previews
+    all_ids = list({pid for o in outfits for pid in o["product_ids"]})
+    products = await db.products.find({"id": {"$in": all_ids}}, {"_id": 0}).to_list(length=500)
+    p_map = {p["id"]: p for p in products}
+    for o in outfits:
+        o["products"] = [p_map[pid] for pid in o["product_ids"] if pid in p_map]
+        o["total_price"] = round(sum(p["price"] for p in o["products"]), 2)
+    return {"items": outfits}
+
+
+@api.post("/outfits/{outfit_id}/add-to-cart")
+async def outfit_to_cart(outfit_id: str, current=Depends(get_current_user)):
+    outfit = await db.outfits.find_one({"id": outfit_id, "user_id": current["id"]}, {"_id": 0})
+    if not outfit:
+        raise HTTPException(404, "Outfit not found")
+    products = await db.products.find({"id": {"$in": outfit["product_ids"]}}, {"_id": 0}).to_list(length=20)
+    added = 0
+    for p in products:
+        existing = await db.cart.find_one({
+            "user_id": current["id"], "product_id": p["id"],
+            "size": p.get("sizes", [None])[0], "color": p.get("colors", [None])[0],
+        })
+        if existing:
+            await db.cart.update_one({"id": existing["id"]}, {"$inc": {"quantity": 1}})
+        else:
+            await db.cart.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": current["id"],
+                "product_id": p["id"],
+                "size": p.get("sizes", [None])[0],
+                "color": p.get("colors", [None])[0],
+                "quantity": 1,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        added += 1
+    return {"status": "ok", "added": added}
+
+
+@api.delete("/outfits/{outfit_id}")
+async def delete_outfit(outfit_id: str, current=Depends(get_current_user)):
+    await db.outfits.delete_one({"id": outfit_id, "user_id": current["id"]})
+    return {"status": "removed"}
 
 
 # ---------------------- Health ----------------------
