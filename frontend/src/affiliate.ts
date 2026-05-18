@@ -41,7 +41,7 @@
 
 // ─── STEP 1: Skimlinks ────────────────────────────────────────────────────────
 // Replace with your Publisher ID from skimlinks.com
-const SKIMLINKS_ID = "";  // e.g. "123456X1234567"
+const SKIMLINKS_ID = "303238X1791280";
 
 // ─── STEP 2: Brand-specific affiliate IDs ────────────────────────────────────
 // Fill these in after getting approved by each network.
