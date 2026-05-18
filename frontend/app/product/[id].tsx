@@ -9,23 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
 import { api } from "../../src/api";
 import { colors, radii, spacing, typography, shadows } from "../../src/theme";
-
-// Brand-specific product search URLs — opens directly to search results for the item
-const BRAND_SEARCH_URLS: Record<string, (name: string) => string> = {
-  "Zara":              (n) => `https://www.zara.com/us/en/search?searchTerm=${encodeURIComponent(n)}`,
-  "H&M":               (n) => `https://www2.hm.com/en_us/search-results.html?q=${encodeURIComponent(n)}`,
-  "Uniqlo":            (n) => `https://www.uniqlo.com/us/en/search?q=${encodeURIComponent(n)}`,
-  "COS":               (n) => `https://www.cos.com/en_usd/search/?q=${encodeURIComponent(n)}`,
-  "Aritzia":           (n) => `https://www.aritzia.com/us/en/search?q=${encodeURIComponent(n)}`,
-  "Reformation":       (n) => `https://www.thereformation.com/search?q=${encodeURIComponent(n)}`,
-  "Everlane":          (n) => `https://www.everlane.com/search?query=${encodeURIComponent(n)}`,
-  "Ganni":             (n) => `https://www.ganni.com/en-us/search?q=${encodeURIComponent(n)}`,
-  "Levi's":            (n) => `https://www.levi.com/US/en_US/search?keywords=${encodeURIComponent(n)}`,
-  "Acne Studios":      (n) => `https://www.acnestudios.com/us/en/search?q=${encodeURIComponent(n)}`,
-  "Fenty Beauty":      (n) => `https://fentybeauty.com/search?q=${encodeURIComponent(n)}`,
-  "Rare Beauty":       (n) => `https://www.rarebeauty.com/search?q=${encodeURIComponent(n)}`,
-  "Charlotte Tilbury": (n) => `https://www.charlottetilbury.com/us/search/${encodeURIComponent(n)}`,
-};
+import { buildAffiliateUrl, isAffiliateReady } from "../../src/affiliate";
 
 export default function ProductDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -127,24 +111,22 @@ export default function ProductDetail() {
     }
   };
   const openRetailer = async () => {
-    // Use the stored retailer_url from the product (product-specific search), or build one from brand map
-    const storedUrl: string | undefined = p.retailer_url;
-    const buildUrl = BRAND_SEARCH_URLS[p.brand];
+    // Build affiliate URL (commissions go to Lumi when user purchases)
+    const affiliateUrl = buildAffiliateUrl(p.brand, p.name, p.retailer_url);
 
-    const url = storedUrl || (buildUrl ? buildUrl(p.name) : null);
-
-    if (!url) {
+    if (!affiliateUrl) {
       Alert.alert(
-        "Retailer site unavailable",
-        `We don't have a direct link for ${p.brand} yet. Try searching their website manually.`
+        "Retailer unavailable",
+        `We don't have a link for ${p.brand} yet.`
       );
       return;
     }
 
+    // Track click event for analytics
     api.post(`/products/${p.id}/track`, { product_id: p.id, event: "click" }).catch(() => {});
 
-    // Open in in-app browser — user stays in Lumi, can come back easily
-    await WebBrowser.openBrowserAsync(url, {
+    // Open in in-app browser — keeps user in Lumi, affiliate cookie is set
+    await WebBrowser.openBrowserAsync(affiliateUrl, {
       presentationStyle: WebBrowser.WebBrowserPresentationStyle.FORM_SHEET,
       toolbarColor: colors.background,
     });
@@ -254,11 +236,18 @@ export default function ProductDetail() {
               <Ionicons name="storefront-outline" size={18} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.retailerTitle}>
-                {isBeauty ? "Buy on Official Site" : "Shop This Item"}
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={styles.retailerTitle}>
+                  {isBeauty ? "Buy on Official Site" : "Shop This Item"}
+                </Text>
+                {isAffiliateReady() && (
+                  <View style={styles.commissionBadge}>
+                    <Text style={styles.commissionText}>earns commission</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.retailerSub}>
-                Search {p.brand} for "{p.name.length > 28 ? p.name.slice(0, 28) + "…" : p.name}"
+                Opens {p.brand} · search "{p.name.length > 24 ? p.name.slice(0, 24) + "…" : p.name}"
               </Text>
             </View>
             <Ionicons name="open-outline" size={16} color={colors.textMuted} />
@@ -419,6 +408,12 @@ const styles = StyleSheet.create({
   },
   retailerTitle: { fontSize: 14, fontWeight: "700", color: colors.textMain },
   retailerSub: { fontSize: 11.5, color: colors.textMuted, marginTop: 2 },
+  commissionBadge: {
+    backgroundColor: colors.success + "22",
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 4,
+  },
+  commissionText: { fontSize: 9, color: colors.success, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   errorBtn: { marginTop: 18, paddingVertical: 12, paddingHorizontal: 28, borderRadius: radii.pill, backgroundColor: colors.ctaBg },
   errorBtnText: { color: "#fff", fontWeight: "600", fontSize: 14 },
