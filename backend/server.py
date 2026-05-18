@@ -35,14 +35,15 @@ if STRIPE_API_KEY:
     stripe.api_key = STRIPE_API_KEY
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:8081')
 
-# macOS system Python ships LibreSSL which is incompatible with MongoDB Atlas TLS.
-# Detect it and disable cert verification so the connection still works locally.
-import ssl as _ssl
-_libressl = _ssl.OPENSSL_VERSION.startswith("LibreSSL")
-if _libressl:
-    client = AsyncIOMotorClient(MONGO_URL, tls=True, tlsAllowInvalidCertificates=True)
-else:
-    client = AsyncIOMotorClient(MONGO_URL)
+# Motor is lazy — actual TCP+TLS handshake happens on first query.
+# Pass a short serverSelectionTimeoutMS so startup doesn't hang indefinitely
+# if the Atlas cluster is slow or the network blocks TLS (e.g. corporate wifi).
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    serverSelectionTimeoutMS=15000,   # fail fast so Railway doesn't time out
+    connectTimeoutMS=10000,
+    socketTimeoutMS=10000,
+)
 db = client[DB_NAME]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -174,18 +175,25 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
 # ---------------------- Startup: seed ----------------------
 @app.on_event("startup")
 async def on_startup():
-    fashion_count = await db.products.count_documents({"type": "fashion"})
-    if fashion_count == 0:
-        await db.products.insert_many(build_fashion_products())
-        logger.info("Seeded fashion products")
-    beauty_count = await db.products.count_documents({"type": "beauty"})
-    if beauty_count == 0:
-        await db.products.insert_many(build_beauty_products())
-        logger.info("Seeded beauty products")
-    stores_count = await db.stores.count_documents({})
-    if stores_count == 0:
-        await db.stores.insert_many(build_stores())
-        logger.info("Seeded stores")
+    """Seed the database on first boot. Non-fatal — server starts even if DB is unreachable."""
+    try:
+        fashion_count = await db.products.count_documents({"type": "fashion"})
+        if fashion_count == 0:
+            await db.products.insert_many(build_fashion_products())
+            logger.info("Seeded fashion products")
+        beauty_count = await db.products.count_documents({"type": "beauty"})
+        if beauty_count == 0:
+            await db.products.insert_many(build_beauty_products())
+            logger.info("Seeded beauty products")
+        stores_count = await db.stores.count_documents({})
+        if stores_count == 0:
+            await db.stores.insert_many(build_stores())
+            logger.info("Seeded stores")
+        logger.info("Database ready ✅")
+    except Exception as exc:
+        # Don't crash the server — Railway/health checks still pass.
+        # The first real user request will surface a proper DB error if needed.
+        logger.warning(f"Startup seeding skipped (DB unreachable): {exc}")
 
 
 @app.on_event("shutdown")
