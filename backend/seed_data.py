@@ -32,27 +32,66 @@ COLORS = ["beige", "black", "white", "cream", "olive", "navy", "brown", "grey", 
 SIZES = ["XS", "S", "M", "L", "XL"]
 
 FASHION_PRODUCTS = [
-    {"name": "Oversized Linen Blazer", "brand": "COS", "price": 175.00, "style": "quiet luxury", "sustainable": True, "colors": ["beige", "stone"]},
-    {"name": "Wide Leg Trousers", "brand": "Aritzia", "price": 128.00, "style": "minimal", "sustainable": False, "colors": ["black", "cream"]},
-    {"name": "Vintage Wash Denim", "brand": "Levi's", "price": 89.00, "style": "vintage", "sustainable": True, "colors": ["navy", "grey"]},
-    {"name": "Cashmere Crew Neck", "brand": "Uniqlo", "price": 99.00, "style": "minimal", "sustainable": False, "colors": ["cream", "beige", "black"]},
-    {"name": "Sculpted Trench Coat", "brand": "Acne Studios", "price": 890.00, "style": "old money", "sustainable": True, "colors": ["beige"]},
-    {"name": "Boxy Cropped Tee", "brand": "Zara", "price": 25.99, "style": "streetwear", "sustainable": False, "colors": ["white", "black"]},
-    {"name": "Pleated Midi Skirt", "brand": "H&M", "price": 49.99, "style": "minimal", "sustainable": True, "colors": ["olive", "stone"]},
-    {"name": "Silk Slip Dress", "brand": "Reformation", "price": 248.00, "style": "old money", "sustainable": True, "colors": ["rust", "cream"]},
-    {"name": "Logo Knit Cardigan", "brand": "Ganni", "price": 295.00, "style": "vintage", "sustainable": True, "colors": ["brown", "olive"]},
-    {"name": "Heavyweight Hoodie", "brand": "Everlane", "price": 78.00, "style": "casual", "sustainable": True, "colors": ["grey", "navy", "black"]},
-    {"name": "Tailored Wool Coat", "brand": "COS", "price": 350.00, "style": "corporate", "sustainable": True, "colors": ["camel", "black"]},
-    {"name": "Cargo Pants", "brand": "Zara", "price": 59.99, "style": "streetwear", "sustainable": False, "colors": ["olive", "stone"]},
-    {"name": "Cropped Athletic Tank", "brand": "Uniqlo", "price": 19.99, "style": "athletic", "sustainable": False, "colors": ["black", "white"]},
-    {"name": "Leather Chelsea Boots", "brand": "Acne Studios", "price": 540.00, "style": "old money", "sustainable": False, "colors": ["black", "brown"]},
-    {"name": "Linen Button-Up", "brand": "Everlane", "price": 88.00, "style": "minimal", "sustainable": True, "colors": ["white", "stone"]},
-    {"name": "High Rise Mom Jeans", "brand": "Levi's", "price": 98.00, "style": "vintage", "sustainable": True, "colors": ["navy"]},
-    {"name": "Ribbed Tank Top", "brand": "H&M", "price": 12.99, "style": "minimal", "sustainable": False, "colors": ["white", "black", "cream"]},
-    {"name": "Satin Slip Skirt", "brand": "Aritzia", "price": 138.00, "style": "quiet luxury", "sustainable": False, "colors": ["rust", "olive"]},
-    {"name": "Graphic Crewneck", "brand": "Zara", "price": 35.99, "style": "streetwear", "sustainable": False, "colors": ["grey", "black"]},
-    {"name": "Performance Leggings", "brand": "Uniqlo", "price": 39.99, "style": "athletic", "sustainable": False, "colors": ["black", "navy"]},
+    # Each product has its own image matched to the item type
+    {"name": "Oversized Linen Blazer", "brand": "COS", "price": 175.00, "style": "quiet luxury", "sustainable": True, "colors": ["beige", "stone"],
+     "image": "https://images.unsplash.com/photo-1581338834647-b0fb40704e21?w=600&q=80"},  # beige blazer
+    {"name": "Wide Leg Trousers", "brand": "Aritzia", "price": 128.00, "style": "minimal", "sustainable": False, "colors": ["black", "cream"],
+     "image": "https://images.unsplash.com/photo-1594938298603-c8148c4b4e50?w=600&q=80"},  # wide-leg trousers
+    {"name": "Vintage Wash Denim", "brand": "Levi's", "price": 89.00, "style": "vintage", "sustainable": True, "colors": ["navy", "grey"],
+     "image": "https://images.unsplash.com/photo-1542272604-787c3835535d?w=600&q=80"},  # denim jeans
+    {"name": "Cashmere Crew Neck", "brand": "Uniqlo", "price": 99.00, "style": "minimal", "sustainable": False, "colors": ["cream", "beige", "black"],
+     "image": "https://images.unsplash.com/photo-1485518882345-15568b007407?w=600&q=80"},  # knit sweater
+    {"name": "Sculpted Trench Coat", "brand": "Acne Studios", "price": 890.00, "style": "old money", "sustainable": True, "colors": ["beige"],
+     "image": "https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=600&q=80"},  # trench coat
+    {"name": "Boxy Cropped Tee", "brand": "Zara", "price": 25.99, "style": "streetwear", "sustainable": False, "colors": ["white", "black"],
+     "image": "https://images.unsplash.com/photo-1551803091-e20673f15770?w=600&q=80"},  # cropped tee
+    {"name": "Pleated Midi Skirt", "brand": "H&M", "price": 49.99, "style": "minimal", "sustainable": True, "colors": ["olive", "stone"],
+     "image": "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=600&q=80"},  # midi skirt
+    {"name": "Silk Slip Dress", "brand": "Reformation", "price": 248.00, "style": "old money", "sustainable": True, "colors": ["rust", "cream"],
+     "image": "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=600&q=80"},  # silk slip dress
+    {"name": "Logo Knit Cardigan", "brand": "Ganni", "price": 295.00, "style": "vintage", "sustainable": True, "colors": ["brown", "olive"],
+     "image": "https://images.unsplash.com/photo-1544022613-e87ca75a784a?w=600&q=80"},  # knit cardigan
+    {"name": "Heavyweight Hoodie", "brand": "Everlane", "price": 78.00, "style": "casual", "sustainable": True, "colors": ["grey", "navy", "black"],
+     "image": "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=600&q=80"},  # hoodie
+    {"name": "Tailored Wool Coat", "brand": "COS", "price": 350.00, "style": "corporate", "sustainable": True, "colors": ["camel", "black"],
+     "image": "https://images.unsplash.com/photo-1532453288672-3a27e9be9efd?w=600&q=80"},  # wool coat
+    {"name": "Cargo Pants", "brand": "Zara", "price": 59.99, "style": "streetwear", "sustainable": False, "colors": ["olive", "stone"],
+     "image": "https://images.unsplash.com/photo-1551488831-00ddcb6c6bd3?w=600&q=80"},  # streetwear cargo
+    {"name": "Cropped Athletic Tank", "brand": "Uniqlo", "price": 19.99, "style": "athletic", "sustainable": False, "colors": ["black", "white"],
+     "image": "https://images.unsplash.com/photo-1576566588028-4147f3842f27?w=600&q=80"},  # athletic top
+    {"name": "Leather Chelsea Boots", "brand": "Acne Studios", "price": 540.00, "style": "old money", "sustainable": False, "colors": ["black", "brown"],
+     "image": "https://images.unsplash.com/photo-1564859228273-274232fdb516?w=600&q=80"},  # boots
+    {"name": "Linen Button-Up", "brand": "Everlane", "price": 88.00, "style": "minimal", "sustainable": True, "colors": ["white", "stone"],
+     "image": "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?w=600&q=80"},  # white shirt
+    {"name": "High Rise Mom Jeans", "brand": "Levi's", "price": 98.00, "style": "vintage", "sustainable": True, "colors": ["navy"],
+     "image": "https://images.unsplash.com/photo-1496747611176-843222e1e57c?w=600&q=80"},  # vintage denim
+    {"name": "Ribbed Tank Top", "brand": "H&M", "price": 12.99, "style": "minimal", "sustainable": False, "colors": ["white", "black", "cream"],
+     "image": "https://images.unsplash.com/photo-1518049362265-d5b2a6467637?w=600&q=80"},  # minimal tank
+    {"name": "Satin Slip Skirt", "brand": "Aritzia", "price": 138.00, "style": "quiet luxury", "sustainable": False, "colors": ["rust", "olive"],
+     "image": "https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=600&q=80"},  # satin/luxury
+    {"name": "Graphic Crewneck", "brand": "Zara", "price": 35.99, "style": "streetwear", "sustainable": False, "colors": ["grey", "black"],
+     "image": "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=600&q=80"},  # crewneck
+    {"name": "Performance Leggings", "brand": "Uniqlo", "price": 39.99, "style": "athletic", "sustainable": False, "colors": ["black", "navy"],
+     "image": "https://images.unsplash.com/photo-1506629082955-511b1aa562c8?w=600&q=80"},  # athletic leggings
 ]
+
+
+# Brand search URL templates — {q} is replaced with the URL-encoded product name
+BRAND_SEARCH_URLS: dict = {
+    "Zara":         "https://www.zara.com/us/en/search?searchTerm={q}",
+    "H&M":          "https://www2.hm.com/en_us/search-results.html?q={q}",
+    "Uniqlo":       "https://www.uniqlo.com/us/en/search?q={q}",
+    "COS":          "https://www.cos.com/en_usd/search/?q={q}",
+    "Aritzia":      "https://www.aritzia.com/us/en/search?q={q}",
+    "Reformation":  "https://www.thereformation.com/search?q={q}",
+    "Everlane":     "https://www.everlane.com/search?query={q}",
+    "Ganni":        "https://www.ganni.com/en-us/search?q={q}",
+    "Levi's":       "https://www.levi.com/US/en_US/search?keywords={q}",
+    "Acne Studios": "https://www.acnestudios.com/us/en/search?q={q}",
+    "Fenty Beauty": "https://fentybeauty.com/search?q={q}",
+    "Rare Beauty":  "https://www.rarebeauty.com/search?q={q}",
+    "Charlotte Tilbury": "https://www.charlottetilbury.com/us/search/{q}",
+}
 
 
 def get_budget_category(price: float) -> str:
@@ -66,13 +105,15 @@ def get_budget_category(price: float) -> str:
 def build_fashion_products():
     out = []
     for i, p in enumerate(FASHION_PRODUCTS):
+        # Use per-product image if set, otherwise fall back to pool by index
+        image = p.get("image") or FASHION_IMAGES[i % len(FASHION_IMAGES)]
         out.append({
             "id": str(uuid.uuid4()),
             "type": "fashion",
             "name": p["name"],
             "brand": p["brand"],
             "price": p["price"],
-            "image": FASHION_IMAGES[i % len(FASHION_IMAGES)],
+            "image": image,
             "colors": p["colors"],
             "sizes": SIZES,
             "style": p["style"],
@@ -80,6 +121,8 @@ def build_fashion_products():
             "budget_category": get_budget_category(p["price"]),
             "description": f"A {p['style']} {p['name'].lower()} crafted by {p['brand']}. Versatile, refined, and made to layer.",
             "created_at": datetime.now(timezone.utc).isoformat(),
+            # Direct retailer search URL for this product
+            "retailer_url": BRAND_SEARCH_URLS.get(p["brand"], "").replace("{q}", p["name"].replace(" ", "+")),
         })
     return out
 
@@ -171,6 +214,8 @@ BEAUTY_PRODUCTS = [
 def build_beauty_products():
     out = []
     for i, p in enumerate(BEAUTY_PRODUCTS):
+        image = p.get("image") or BEAUTY_IMAGES[i % len(BEAUTY_IMAGES)]
+        retailer_url = BRAND_SEARCH_URLS.get(p["brand"], "").replace("{q}", p["name"].replace(" ", "+"))
         out.append({
             "id": str(uuid.uuid4()),
             "type": "beauty",
@@ -178,7 +223,7 @@ def build_beauty_products():
             "brand": p["brand"],
             "category": p["category"],
             "price": p["price"],
-            "image": BEAUTY_IMAGES[i % len(BEAUTY_IMAGES)],
+            "image": image,
             "shades": p["shades"],
             "compatible_skin_tones": p["skin_tones"],
             "compatible_skin_types": p["skin_types"],
@@ -188,6 +233,7 @@ def build_beauty_products():
             "reviews": p["reviews"],
             "trending": p["reviews"] > 10000,
             "description": f"{p['name']} from {p['brand']} — beloved for its formula and shade range.",
+            "retailer_url": retailer_url,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     return out

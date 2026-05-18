@@ -1,28 +1,30 @@
 import { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, ActivityIndicator,
-  Linking, Alert,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as WebBrowser from "expo-web-browser";
 import { api } from "../../src/api";
 import { colors, radii, spacing, typography, shadows } from "../../src/theme";
 
-const BRAND_SITES: Record<string, string> = {
-  "Zara": "https://www.zara.com",
-  "H&M": "https://www2.hm.com",
-  "Uniqlo": "https://www.uniqlo.com",
-  "COS": "https://www.cos.com",
-  "Aritzia": "https://www.aritzia.com",
-  "Reformation": "https://www.thereformation.com",
-  "Everlane": "https://www.everlane.com",
-  "Ganni": "https://www.ganni.com",
-  "Levi's": "https://www.levi.com",
-  "Acne Studios": "https://www.acnestudios.com",
-  "Fenty Beauty": "https://fentybeauty.com",
-  "Rare Beauty": "https://www.rarebeauty.com",
-  "Charlotte Tilbury": "https://www.charlottetilbury.com",
+// Brand-specific product search URLs — opens directly to search results for the item
+const BRAND_SEARCH_URLS: Record<string, (name: string) => string> = {
+  "Zara":              (n) => `https://www.zara.com/us/en/search?searchTerm=${encodeURIComponent(n)}`,
+  "H&M":               (n) => `https://www2.hm.com/en_us/search-results.html?q=${encodeURIComponent(n)}`,
+  "Uniqlo":            (n) => `https://www.uniqlo.com/us/en/search?q=${encodeURIComponent(n)}`,
+  "COS":               (n) => `https://www.cos.com/en_usd/search/?q=${encodeURIComponent(n)}`,
+  "Aritzia":           (n) => `https://www.aritzia.com/us/en/search?q=${encodeURIComponent(n)}`,
+  "Reformation":       (n) => `https://www.thereformation.com/search?q=${encodeURIComponent(n)}`,
+  "Everlane":          (n) => `https://www.everlane.com/search?query=${encodeURIComponent(n)}`,
+  "Ganni":             (n) => `https://www.ganni.com/en-us/search?q=${encodeURIComponent(n)}`,
+  "Levi's":            (n) => `https://www.levi.com/US/en_US/search?keywords=${encodeURIComponent(n)}`,
+  "Acne Studios":      (n) => `https://www.acnestudios.com/us/en/search?q=${encodeURIComponent(n)}`,
+  "Fenty Beauty":      (n) => `https://fentybeauty.com/search?q=${encodeURIComponent(n)}`,
+  "Rare Beauty":       (n) => `https://www.rarebeauty.com/search?q=${encodeURIComponent(n)}`,
+  "Charlotte Tilbury": (n) => `https://www.charlottetilbury.com/us/search/${encodeURIComponent(n)}`,
 };
 
 export default function ProductDetail() {
@@ -125,15 +127,27 @@ export default function ProductDetail() {
     }
   };
   const openRetailer = async () => {
-    const url = BRAND_SITES[p.brand];
+    // Use the stored retailer_url from the product (product-specific search), or build one from brand map
+    const storedUrl: string | undefined = p.retailer_url;
+    const buildUrl = BRAND_SEARCH_URLS[p.brand];
+
+    const url = storedUrl || (buildUrl ? buildUrl(p.name) : null);
+
     if (!url) {
-      Alert.alert("Retailer site unavailable", `${p.brand} doesn't have a linked site yet.`);
+      Alert.alert(
+        "Retailer site unavailable",
+        `We don't have a direct link for ${p.brand} yet. Try searching their website manually.`
+      );
       return;
     }
+
     api.post(`/products/${p.id}/track`, { product_id: p.id, event: "click" }).catch(() => {});
-    const ok = await Linking.canOpenURL(url);
-    if (ok) Linking.openURL(url);
-    else Alert.alert("Cannot open link", url);
+
+    // Open in in-app browser — user stays in Lumi, can come back easily
+    await WebBrowser.openBrowserAsync(url, {
+      presentationStyle: WebBrowser.WebBrowserPresentationStyle.FORM_SHEET,
+      toolbarColor: colors.background,
+    });
   };
 
   return (
@@ -241,9 +255,11 @@ export default function ProductDetail() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.retailerTitle}>
-                {isBeauty ? "Buy Now" : "View in Store"}
+                {isBeauty ? "Buy on Official Site" : "Shop This Item"}
               </Text>
-              <Text style={styles.retailerSub}>Shop on {p.brand}'s official site</Text>
+              <Text style={styles.retailerSub}>
+                Search {p.brand} for "{p.name.length > 28 ? p.name.slice(0, 28) + "…" : p.name}"
+              </Text>
             </View>
             <Ionicons name="open-outline" size={16} color={colors.textMuted} />
           </TouchableOpacity>
