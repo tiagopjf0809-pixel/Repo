@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 import stripe
+import anthropic
 
 from seed_data import build_fashion_products, build_beauty_products
 from stores_seed import build_stores, CITY_CENTER
@@ -28,10 +29,11 @@ DB_NAME = os.environ['DB_NAME']
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 43200))
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
-stripe.api_key = STRIPE_API_KEY
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://fashion-lens-23.preview.emergentagent.com')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')   # optional — AI features only
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
+if STRIPE_API_KEY:
+    stripe.api_key = STRIPE_API_KEY
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:8081')
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -523,30 +525,29 @@ No markdown, no extra text — only the JSON object."""
 
 @api.post("/beauty/face-scan")
 async def face_scan(req: FaceScanReq, current=Depends(get_current_user)):
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-    except Exception as e:
-        raise HTTPException(500, f"LLM integration unavailable: {e}")
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(503, "AI features require ANTHROPIC_API_KEY in backend .env")
 
     # Strip any data URL prefix from the base64
     img_b64 = req.image_base64
     if img_b64.startswith("data:"):
         img_b64 = img_b64.split(",", 1)[-1]
 
-    session_id = str(uuid.uuid4())
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=FACE_SCAN_PROMPT,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-    msg = UserMessage(
-        text="Analyze this selfie according to the system instructions. Return only the JSON object.",
-        file_contents=[ImageContent(image_base64=img_b64)],
-    )
-
     try:
-        response = await chat.send_message(msg)
+        ai = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        result = ai.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=1024,
+            system=FACE_SCAN_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
+                    {"type": "text", "text": "Analyze this selfie according to the system instructions. Return only the JSON object."},
+                ],
+            }],
+        )
+        response = result.content[0].text
     except Exception as e:
         logger.exception("Face scan LLM error")
         raise HTTPException(502, f"AI analysis failed: {str(e)[:200]}")
@@ -617,10 +618,8 @@ STYLIST_SYSTEM = """You are Lumi, a warm and stylish AI personal shopper. You he
 
 @api.post("/stylist/chat")
 async def stylist_chat(req: StylistChatReq, current=Depends(get_current_user)):
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-    except Exception as e:
-        raise HTTPException(500, f"LLM integration unavailable: {e}")
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(503, "AI features require ANTHROPIC_API_KEY in backend .env")
 
     session_id = req.session_id or str(uuid.uuid4())
 
@@ -631,14 +630,22 @@ async def stylist_chat(req: StylistChatReq, current=Depends(get_current_user)):
     if style_id:
         system += f"\n\nThe user's style identity is: {style_id}."
 
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+    # Load prior messages in this session for context
+    prior = await db.chat_messages.find(
+        {"session_id": session_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(length=20)
+    history = [{"role": m["role"], "content": m["content"]} for m in prior]
+    history.append({"role": "user", "content": req.message})
 
     try:
-        response = await chat.send_message(UserMessage(text=req.message))
+        ai = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        result = ai.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=512,
+            system=system,
+            messages=history,
+        )
+        response = result.content[0].text
     except Exception as e:
         logger.exception("Stylist chat LLM error")
         raise HTTPException(502, f"AI stylist failed: {str(e)[:200]}")
@@ -1099,10 +1106,8 @@ async def style_outfit(req: OutfitStyleReq, current=Depends(get_current_user)):
     if not products:
         raise HTTPException(404, "No products found")
 
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-    except Exception as e:
-        raise HTTPException(500, f"LLM unavailable: {e}")
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(503, "AI features require ANTHROPIC_API_KEY in backend .env")
 
     user = await db.users.find_one({"id": current["id"]}, {"_id": 0})
     style_id = user.get("style_identity") if user else None
@@ -1117,11 +1122,15 @@ async def style_outfit(req: OutfitStyleReq, current=Depends(get_current_user)):
     occasion_text = f" The occasion is: {req.occasion}." if req.occasion else ""
     prompt = f"Style this outfit using these {len(products)} pieces:\n{items_text}\n{occasion_text}"
 
-    session_id = str(uuid.uuid4())
-    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=sys_msg)\
-        .with_model("anthropic", "claude-sonnet-4-5-20250929")
     try:
-        response = await chat.send_message(UserMessage(text=prompt))
+        ai = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        result = ai.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=512,
+            system=sys_msg,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        response = result.content[0].text
     except Exception as e:
         logger.exception("Outfit styling LLM error")
         raise HTTPException(502, f"AI styling failed: {str(e)[:200]}")
