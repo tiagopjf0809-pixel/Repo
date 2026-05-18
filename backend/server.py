@@ -35,7 +35,14 @@ if STRIPE_API_KEY:
     stripe.api_key = STRIPE_API_KEY
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:8081')
 
-client = AsyncIOMotorClient(MONGO_URL)
+# macOS system Python ships LibreSSL which is incompatible with MongoDB Atlas TLS.
+# Detect it and disable cert verification so the connection still works locally.
+import ssl as _ssl
+_libressl = _ssl.OPENSSL_VERSION.startswith("LibreSSL")
+if _libressl:
+    client = AsyncIOMotorClient(MONGO_URL, tls=True, tlsAllowInvalidCertificates=True)
+else:
+    client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
